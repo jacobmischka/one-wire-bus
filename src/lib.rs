@@ -227,7 +227,7 @@ where
     /// There is no requirement to immediately finish iterating all devices, but if devices are
     /// added / removed / change alarm state, the search may return an error or fail to find a device
     /// Device addresses will always be returned in the same order (lowest to highest, Little Endian)
-    pub fn devices<'a, 'b, D>(
+    pub fn devices<'a, 'b, 'c, D>(
         &'a mut self,
         only_alarming: bool,
         delay: &'b mut D,
@@ -282,12 +282,12 @@ where
                 let _false_bit = !self.read_bit(delay)?;
                 let _true_bit = !self.read_bit(delay)?;
                 let was_discrepancy_bit =
-                    (search_state.discrepancies & (1_u64 << (bit_index as u64))) != 0;
+                    (search_state.discrepancies & shl(1_u64, bit_index as u32)) != 0;
                 if was_discrepancy_bit {
                     last_discrepancy_index = bit_index;
                 }
                 let previous_chosen_bit =
-                    (search_state.address & (1_u64 << (bit_index as u64))) != 0;
+                    (search_state.address & shl(1_u64, bit_index as u32)) != 0;
 
                 // choose the same as last time
                 self.write_bit(previous_chosen_bit, delay)?;
@@ -301,14 +301,14 @@ where
                     // A different response was received than last search
                     return Err(OneWireError::UnexpectedResponse);
                 }
-                let address_mask = 1_u64 << (search_state.last_discrepancy_index as u64);
+                let address_mask = shl(1_u64, search_state.last_discrepancy_index as u32);
                 address |= address_mask;
                 self.write_bit(true, delay)?;
             }
 
             //keep all discrepancies except the last one
             discrepancies = search_state.discrepancies
-                & !(1_u64 << (search_state.last_discrepancy_index as u64));
+                & !shl(1_u64, search_state.last_discrepancy_index as u32);
             continue_start_bit = search_state.last_discrepancy_index + 1;
         } else {
             address = 0;
@@ -318,6 +318,7 @@ where
         for bit_index in continue_start_bit..64 {
             let false_bit = !self.read_bit(delay)?;
             let true_bit = !self.read_bit(delay)?;
+
             let chosen_bit = match (false_bit, true_bit) {
                 (false, false) => {
                     // No devices responded to the search request
@@ -334,12 +335,12 @@ where
                 (true, true) => {
                     // Discrepancy, multiple values reported
                     // choosing the lower value here
-                    discrepancies |= 1_u64 << (bit_index as u64);
+                    discrepancies |= shl(1_u64, bit_index as u32);
                     last_discrepancy_index = bit_index;
                     false
                 }
             };
-            let address_mask = 1_u64 << (bit_index as u64);
+            let address_mask = shl(1u64, bit_index as u32);
             if chosen_bit {
                 address |= address_mask;
             } else {
@@ -347,6 +348,7 @@ where
             }
             self.write_bit(chosen_bit, delay)?;
         }
+
         crc::check_crc8(&address.to_le_bytes())?;
         Ok(Some((
             Address(address),
@@ -399,4 +401,8 @@ where
             }
         }
     }
+}
+
+fn shl(x: u64, y: u32) -> u64 {
+    x * 2u64.pow(y)
 }
